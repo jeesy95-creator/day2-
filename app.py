@@ -538,45 +538,86 @@ with col_r4:
         st.info("나이, 체지방률, 골격근량 컬럼이 필요합니다.")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ── Row 5: 시계열 트렌드 ──────────────────────────────────────
+# ── Row 5: 회원 개인 리포트 ──────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown('<div class="chart-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">월별 평균 체성분 트렌드</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">👤 회원 개인 리포트</div>', unsafe_allow_html=True)
 
-if "측정일" in filt.columns and not filt["측정일"].isna().all():
-    trend_cols = [c for c in ["체중(kg)", "체지방률(%)", "골격근량(kg)", "BMI"] if c in filt.columns]
-    if trend_cols:
-        sel_metric = st.selectbox("지표 선택", options=trend_cols, key="trend_metric")
-        trend_df = filt[["측정일", "회원ID", sel_metric]].dropna().copy()
-        trend_df["월"] = trend_df["측정일"].dt.to_period("M").astype(str)
-        monthly = (
-            trend_df.groupby("월")
-            .agg(값=(sel_metric, "mean"), 측정인원=("회원ID", "count"))
-            .reset_index()
-            .sort_values("월")
-        )
-        area_trend = alt.Chart(monthly).mark_area(color=RED, opacity=0.08).encode(
-            x=alt.X("월:N"),
-            y=alt.Y("값:Q", scale=alt.Scale(zero=False)),
-        )
-        line_trend = alt.Chart(monthly).mark_line(
-            point=alt.OverlayMarkDef(color=RED, size=65, filled=True),
-            color=RED, strokeWidth=2.5,
-        ).encode(
-            x=alt.X("월:N", axis=alt.Axis(labelAngle=-30), title=""),
-            y=alt.Y("값:Q", title=sel_metric, scale=alt.Scale(zero=False)),
-            tooltip=["월:N",
-                     alt.Tooltip("값:Q", format=".2f", title=sel_metric),
-                     alt.Tooltip("측정인원:Q", title="측정 인원")],
-        )
-        st.altair_chart(
-            base_chart(alt.layer(area_trend, line_trend).properties(height=220)),
-            use_container_width=True,
-        )
+REPORT_METRICS = [c for c in ["체중(kg)", "BMI", "체지방률(%)", "골격근량(kg)", "내장지방레벨"] if c in filt.columns]
+
+if REPORT_METRICS:
+    filt_r = filt.reset_index(drop=True)
+
+    if "이름" in filt_r.columns:
+        sel_name = st.selectbox("회원 선택", options=filt_r["이름"].tolist(), key="member_select")
+        member_row = filt_r[filt_r["이름"] == sel_name].iloc[0]
     else:
-        st.info("체중, 체지방률, 골격근량, BMI 중 하나 이상의 컬럼이 필요합니다.")
+        sel_idx = st.selectbox("회원 선택", options=filt_r.index.tolist(),
+                               format_func=lambda i: f"회원 {i+1}", key="member_select")
+        member_row = filt_r.iloc[sel_idx]
+
+    # KPI 카드: 본인 수치 vs 전체 평균
+    m_cols = st.columns(len(REPORT_METRICS))
+    for col, metric in zip(m_cols, REPORT_METRICS):
+        val = member_row.get(metric)
+        avg = filt[metric].mean()
+        if pd.notna(val):
+            diff = float(val) - float(avg)
+            sign = "+" if diff > 0 else ""
+            higher_is_bad = metric in ["BMI", "체지방률(%)", "내장지방레벨"]
+            bad = (diff > 0 and higher_is_bad) or (diff < 0 and not higher_is_bad)
+            diff_color = RED if bad else GRAY_600
+            col.markdown(f"""
+<div class="kpi-card">
+  <div class="kpi-label">{metric}</div>
+  <div class="kpi-value">{float(val):.1f}</div>
+  <div class="kpi-sub" style="color:{diff_color}">{sign}{diff:.1f} vs 평균</div>
+</div>""", unsafe_allow_html=True)
+
+    # 그룹 비교 막대 차트
+    st.markdown("<br>", unsafe_allow_html=True)
+    compare_rows = []
+    for metric in REPORT_METRICS:
+        val = member_row.get(metric)
+        avg = filt[metric].mean()
+        if pd.notna(val):
+            compare_rows += [
+                {"지표": metric, "구분": "이 회원", "값": round(float(val), 1)},
+                {"지표": metric, "구분": "전체 평균", "값": round(float(avg), 1)},
+            ]
+    if compare_rows:
+        compare_df = pd.DataFrame(compare_rows)
+        chart_cmp = alt.Chart(compare_df).mark_bar(
+            cornerRadiusTopLeft=5, cornerRadiusTopRight=5
+        ).encode(
+            x=alt.X("지표:N", axis=alt.Axis(labelAngle=0), title=""),
+            y=alt.Y("값:Q", title=""),
+            color=alt.Color("구분:N",
+                scale=alt.Scale(domain=["이 회원", "전체 평균"], range=[RED, GRAY_400]),
+                legend=alt.Legend(title="")),
+            xOffset="구분:N",
+            tooltip=["지표:N", "구분:N", alt.Tooltip("값:Q", format=".1f")],
+        ).properties(height=220)
+        st.altair_chart(base_chart(chart_cmp), use_container_width=True)
+
+    # 목표 체중 진행 상황
+    cur_w  = member_row.get("체중(kg)")
+    goal_w = member_row.get("목표체중(kg)")
+    if pd.notna(cur_w) and pd.notna(goal_w):
+        diff_w  = float(goal_w) - float(cur_w)
+        arrow   = "▼" if diff_w < 0 else "▲"
+        label   = "감량" if diff_w < 0 else "증량"
+        st.markdown(f"""
+<div style="background:{GRAY_100};border-radius:8px;padding:12px 18px;margin-top:4px;
+            display:flex;justify-content:space-between;align-items:center">
+  <span style="font-size:0.85rem;color:{GRAY_600};font-weight:600">목표 체중 달성 현황</span>
+  <span style="font-size:0.85rem;color:{GRAY_400}">현재 {float(cur_w):.1f} kg → 목표 {float(goal_w):.1f} kg</span>
+  <span style="font-size:0.88rem;color:{RED};font-weight:700">
+    {arrow} {abs(diff_w):.1f} kg {label} 필요
+  </span>
+</div>""", unsafe_allow_html=True)
 else:
-    st.info("측정일 컬럼이 필요합니다.")
+    st.info("체성분 관련 컬럼이 필요합니다.")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
