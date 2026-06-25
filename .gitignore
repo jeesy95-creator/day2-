@@ -1,0 +1,11 @@
+# 더미/실습 데이터 — 개인정보 컬럼 포함, 외부 노출 금지
+더미데이터/
+실습/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.env
