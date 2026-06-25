@@ -161,43 +161,61 @@ with st.sidebar:
     usda_api_key = st.text_input("API Key", key="usda_api_key", placeholder="미입력 시 DEMO_KEY 사용")
     st.markdown("<div style='font-size:0.72rem;color:#9CA3AF;margin-top:4px'>DEMO_KEY: 시간 30회 · 일 1,000회 무료</div>", unsafe_allow_html=True)
 
-# ── 파일 미업로드 상태 ─────────────────────────────────────────
-if not file_measurement or not file_member:
-    col_l, col_m, col_r = st.columns([1, 2, 1])
-    with col_m:
-        st.markdown(f"""
-<div class="upload-card">
-  <div style="font-size:3.5rem;margin-bottom:12px">📊</div>
-  <div style="font-size:1.15rem;font-weight:800;color:{GRAY_900};margin-bottom:8px">두 파일을 업로드해 주세요</div>
-  <div style="color:{GRAY_400};font-size:0.88rem;line-height:1.7">
-    왼쪽 사이드바에서<br>
-    <b style="color:{RED}">inbody_측정결과.xlsx</b> 와<br>
-    <b style="color:{RED}">inbody_회원관리.xlsx</b> 를<br>
-    각각 업로드하면 대시보드가 활성화됩니다
-  </div>
-  <hr style="border:none;border-top:1px solid {GRAY_100};margin:20px 0">
-  <div style="display:flex;justify-content:space-around;text-align:center">
-    <div>
-      <div style="font-size:1.6rem">📋</div>
-      <div style="font-size:0.78rem;color:{RED};font-weight:700;margin-top:4px">측정결과</div>
-      <div style="font-size:0.72rem;color:{GRAY_400}">BMI·체지방·근육량</div>
-    </div>
-    <div style="display:flex;align-items:center;color:{GRAY_400};font-size:1.3rem;font-weight:300">+</div>
-    <div>
-      <div style="font-size:1.6rem">🗂️</div>
-      <div style="font-size:0.78rem;color:{GRAY_600};font-weight:700;margin-top:4px">회원관리</div>
-      <div style="font-size:0.72rem;color:{GRAY_400}">센터·프로그램·만족도</div>
-    </div>
-    <div style="display:flex;align-items:center;color:{GRAY_400};font-size:1.3rem;font-weight:300">=</div>
-    <div>
-      <div style="font-size:1.6rem">✨</div>
-      <div style="font-size:0.78rem;color:{GRAY_900};font-weight:700;margin-top:4px">통합 분석</div>
-      <div style="font-size:0.72rem;color:{GRAY_400}">인사이트 대시보드</div>
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-    st.stop()
+# ── 샘플 데이터 생성 ──────────────────────────────────────────
+@st.cache_data
+def generate_sample_data():
+    rng = np.random.default_rng(42)
+    n   = 60
+
+    centers  = ["강남점", "홍대점", "잠실점"]
+    programs = ["PT", "필라테스", "크로스핏", "요가"]
+    trainers = ["김민준", "이서연", "박지훈", "최유나", "정현수"]
+
+    genders = rng.choice(["남", "여"], n)
+    ages    = rng.integers(22, 62, n)
+    heights = np.where(genders == "남",
+        rng.normal(174, 6, n), rng.normal(162, 5, n)).clip(150, 195)
+    weights = np.where(genders == "남",
+        rng.normal(75, 12, n), rng.normal(60, 8, n)).clip(45, 110)
+
+    bmi     = (weights / (heights / 100) ** 2).round(1)
+    fat_pct = np.where(genders == "남",
+        rng.normal(20, 5, n), rng.normal(28, 5, n)).clip(8, 42).round(1)
+    muscle  = (weights * (1 - fat_pct / 100) * rng.uniform(0.44, 0.52, n)).clip(18, 50).round(1)
+    visceral = (bmi / 3 + rng.normal(0, 2, n)).clip(1, 20).astype(int)
+
+    base = pd.Timestamp("2025-07-01")
+    meas_dates = pd.to_datetime([base - pd.Timedelta(days=int(d))
+                                  for d in rng.integers(0, 365, n)])
+    reg_dates  = pd.to_datetime([base - pd.Timedelta(days=int(d) * 30)
+                                  for d in rng.integers(1, 37, n)])
+
+    df_meas = pd.DataFrame({
+        "회원ID":       [f"M{i:03d}" for i in range(1, n + 1)],
+        "이름":         [f"회원{i:03d}" for i in range(1, n + 1)],
+        "성별":         genders,
+        "나이":         ages,
+        "키(cm)":       heights.round(1),
+        "체중(kg)":     weights.round(1),
+        "BMI":          bmi,
+        "체지방률(%)":  fat_pct,
+        "골격근량(kg)": muscle,
+        "내장지방레벨": visceral,
+        "측정일":       meas_dates,
+    })
+    df_memb = pd.DataFrame({
+        "회원ID":          [f"M{i:03d}" for i in range(1, n + 1)],
+        "이용센터":        rng.choice(centers, n),
+        "프로그램":        rng.choice(programs, n),
+        "담당트레이너":    rng.choice(trainers, n),
+        "목표체중(kg)":    (weights + rng.uniform(-8, 3, n)).clip(40, 105).round(1),
+        "만족도(5점)":     np.clip(rng.normal(4.0, 0.7, n), 1.0, 5.0).round(1),
+        "주운동빈도(회)":  rng.integers(1, 7, n),
+        "회원기간(개월)":  rng.integers(1, 37, n),
+        "등록일":          reg_dates,
+    })
+    merged = pd.merge(df_meas, df_memb, on="회원ID", how="inner")
+    return merged, df_meas, df_memb
 
 # ── 데이터 로드 & 머지 ────────────────────────────────────────
 @st.cache_data
@@ -219,11 +237,23 @@ def load_and_merge(f1, f2):
         merged["등록일"] = pd.to_datetime(merged["등록일"], errors="coerce")
     return merged, df_meas, df_memb
 
-try:
-    df, df_meas, df_memb = load_and_merge(file_measurement, file_member)
-except Exception as e:
-    st.error(f"파일 로드 중 오류가 발생했습니다: {e}")
-    st.stop()
+using_sample = not file_measurement or not file_member
+
+if using_sample:
+    df, df_meas, df_memb = generate_sample_data()
+else:
+    try:
+        df, df_meas, df_memb = load_and_merge(file_measurement, file_member)
+    except Exception as e:
+        st.error(f"파일 로드 중 오류가 발생했습니다: {e}")
+        st.stop()
+
+if using_sample:
+    st.markdown(f"""
+<div style="background:#FFF8E1;border-left:4px solid #F59E0B;border-radius:8px;
+            padding:10px 18px;margin-bottom:18px;font-size:0.86rem;color:#92400E;font-weight:600">
+  📋 샘플 데이터로 미리보기 중입니다 — 실제 분석을 하려면 왼쪽 사이드바에서 파일을 업로드하세요
+</div>""", unsafe_allow_html=True)
 
 merge_cnt = len(df)
 meas_cnt  = len(df_meas)
