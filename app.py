@@ -706,16 +706,20 @@ st.markdown('<div class="section-title">🥗 목표 달성 영양 가이드 (USD
 
 _usda_key = usda_api_key.strip() if usda_api_key.strip() else "DEMO_KEY"
 
+# USDA 기준 영양 폴백 데이터 (API 실패 시 사용)
+_FALLBACK_NUTRITION = {
+    "닭가슴살 100g":   {"칼로리(kcal)": 165, "단백질(g)": 31.0, "탄수화물(g)": 0.0,  "지방(g)": 3.6},
+    "고구마 100g":     {"칼로리(kcal)":  90, "단백질(g)":  2.0, "탄수화물(g)": 21.3, "지방(g)": 0.1},
+    "계란 1개":        {"칼로리(kcal)":  78, "단백질(g)":  6.3, "탄수화물(g)":  0.6, "지방(g)": 5.3},
+    "그릭요거트 100g": {"칼로리(kcal)":  59, "단백질(g)": 10.2, "탄수화물(g)":  3.6, "지방(g)": 0.4},
+    "현미밥 100g":     {"칼로리(kcal)": 112, "단백질(g)":  2.6, "탄수화물(g)": 23.5, "지방(g)": 0.9},
+}
+
 @st.cache_data(ttl=86400)
 def fetch_usda_food(query, api_key):
     resp = requests.get(
         "https://api.nal.usda.gov/fdc/v1/foods/search",
-        params={
-            "query": query,
-            "api_key": api_key,
-            "pageSize": 1,
-            "dataType": "Foundation,SR Legacy",
-        },
+        params={"query": query, "api_key": api_key, "pageSize": 1},
         timeout=8,
     )
     resp.raise_for_status()
@@ -723,8 +727,11 @@ def fetch_usda_food(query, api_key):
     if not foods:
         return None
     nutrients = {n["nutrientName"]: n["value"] for n in foods[0].get("foodNutrients", [])}
+    energy = nutrients.get("Energy", 0)
+    if not energy:
+        return None
     return {
-        "칼로리(kcal)": round(nutrients.get("Energy", 0)),
+        "칼로리(kcal)": round(energy),
         "단백질(g)":    round(nutrients.get("Protein", 0), 1),
         "탄수화물(g)":  round(nutrients.get("Carbohydrate, by difference", 0), 1),
         "지방(g)":      round(nutrients.get("Total lipid (fat)", 0), 1),
@@ -739,14 +746,20 @@ USDA_FOODS = [
 ]
 
 food_rows = []
+api_used = False
 with st.spinner("USDA에서 영양 데이터를 불러오는 중..."):
     for label, query in USDA_FOODS:
+        data = None
         try:
             data = fetch_usda_food(query, _usda_key)
             if data:
-                food_rows.append({"식품": label, **data})
+                api_used = True
         except Exception:
             pass
+        if not data:
+            data = _FALLBACK_NUTRITION.get(label)
+        if data:
+            food_rows.append({"식품": label, **data})
 
 n_col1, n_col2 = st.columns([1, 2], gap="large")
 
@@ -828,6 +841,7 @@ with n_col2:
         ).properties(height=180)
         st.altair_chart(base_chart(chart_food), use_container_width=True)
         st.dataframe(food_df, use_container_width=True, hide_index=True, height=200)
-    else:
-        st.warning("USDA에서 데이터를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.")
+        src = "USDA FoodData Central" if api_used else "USDA 기준값 (오프라인)"
+        st.markdown(f"<div style='font-size:0.72rem;color:{GRAY_400};margin-top:6px'>출처: {src}</div>",
+                    unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
