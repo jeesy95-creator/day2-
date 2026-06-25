@@ -350,7 +350,7 @@ with col_r:
             y=alt.Y("골격근량(kg):Q", title="골격근량 (kg)"),
             color=alt.Color("성별:N", scale=alt.Scale(domain=["남","여"], range=[RED, GRAY_400]),
                             legend=alt.Legend(title="성별")),
-            tooltip=["이름:N","성별:N",
+            tooltip=["성별:N",
                      alt.Tooltip("체지방률(%):Q", format=".1f"),
                      alt.Tooltip("골격근량(kg):Q", format=".1f"),
                      "BMI:Q"],
@@ -392,26 +392,27 @@ with col_l2:
 with col_r2:
     st.markdown('<div class="chart-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">목표 체중까지 남은 거리 (현재 − 목표)</div>', unsafe_allow_html=True)
-    if {"체중(kg)","목표체중(kg)","이름"}.issubset(filt.columns):
-        goal_df = filt[["이름","체중(kg)","목표체중(kg)"]].copy()
+    if {"체중(kg)","목표체중(kg)"}.issubset(filt.columns):
+        goal_df = filt[["체중(kg)","목표체중(kg)"]].copy()
         goal_df["차이(kg)"] = (goal_df["체중(kg)"] - goal_df["목표체중(kg)"]).round(1)
-        goal_df = goal_df.sort_values("차이(kg)", ascending=False).head(15)
+        goal_df = goal_df.sort_values("차이(kg)", ascending=False).head(15).reset_index(drop=True)
+        goal_df["순번"] = (goal_df.index + 1).astype(str) + "위"
         goal_df["상태"] = goal_df["차이(kg)"].apply(lambda x: "초과" if x > 0 else "달성")
         chart_g = alt.Chart(goal_df).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
-            x=alt.X("이름:N", sort=alt.EncodingSortField("차이(kg)", order="descending"),
-                    axis=alt.Axis(labelAngle=-35), title=""),
+            x=alt.X("순번:N", sort=alt.EncodingSortField("차이(kg)", order="descending"),
+                    axis=alt.Axis(labelAngle=0), title=""),
             y=alt.Y("차이(kg):Q", title="현재 − 목표 (kg)"),
             color=alt.Color("상태:N",
                             scale=alt.Scale(domain=["초과","달성"], range=[RED, GRAY_400]),
                             legend=alt.Legend(title="상태")),
-            tooltip=["이름:N",
+            tooltip=["순번:N",
                      alt.Tooltip("체중(kg):Q", format=".1f"),
                      alt.Tooltip("목표체중(kg):Q", format=".1f"),
                      alt.Tooltip("차이(kg):Q", format=".1f")],
         ).properties(height=260)
         st.altair_chart(base_chart(chart_g), use_container_width=True)
     else:
-        st.info("체중(kg), 목표체중(kg), 이름 컬럼이 필요합니다.")
+        st.info("체중(kg), 목표체중(kg) 컬럼이 필요합니다.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ── Row 3: 내장지방 분포 | 프로그램별 현황 ───────────────────
@@ -624,7 +625,7 @@ if any(c in filt.columns for c in RISK_COLS):
         st.success("✅ 이탈 위험 기준에 해당하는 회원이 없습니다.")
     else:
         show_risk_cols = [c for c in [
-            "회원ID", "이름", "이용센터", "담당트레이너", "프로그램",
+            "이용센터", "담당트레이너", "프로그램",
             "주운동빈도(회)", "만족도(5점)", "회원기간(개월)", "위험점수", "위험등급",
         ] if c in at_risk.columns]
         st.dataframe(
@@ -645,8 +646,9 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown('<div class="section-title">📋 통합 데이터 탐색</div>', unsafe_allow_html=True)
 
+SENSITIVE = {"회원ID", "이름"}
 display_cols = [c for c in [
-    "회원ID","이름","성별","나이","이용센터","프로그램","담당트레이너",
+    "성별","나이","이용센터","프로그램","담당트레이너",
     "체중(kg)","BMI","체지방률(%)","골격근량(kg)","내장지방레벨",
     "목표체중(kg)","만족도(5점)","주운동빈도(회)","회원기간(개월)",
 ] if c in filt.columns]
@@ -654,7 +656,8 @@ display_cols = [c for c in [
 st.dataframe(filt[display_cols].reset_index(drop=True), use_container_width=True, height=300, hide_index=True)
 
 with st.expander("전체 컬럼 보기"):
-    st.dataframe(filt.reset_index(drop=True), use_container_width=True, height=280, hide_index=True)
+    safe_cols = [c for c in filt.columns if c not in SENSITIVE]
+    st.dataframe(filt[safe_cols].reset_index(drop=True), use_container_width=True, height=280, hide_index=True)
 
 # ── 영양 가이드 (USDA FoodData Central) ──────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
