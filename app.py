@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
+import requests
 
 st.set_page_config(page_title="InBody 회원 분석 대시보드", layout="wide")
 
@@ -442,3 +443,76 @@ st.dataframe(filt[display_cols].reset_index(drop=True), use_container_width=True
 
 with st.expander("전체 컬럼 보기"):
     st.dataframe(filt.reset_index(drop=True), use_container_width=True, height=280, hide_index=True)
+
+# ── 서울 날씨 (Open-Meteo) ────────────────────────────────────
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown('<div class="section-title">🌡️ 서울 현재 날씨 (Open-Meteo)</div>', unsafe_allow_html=True)
+
+@st.cache_data(ttl=600)
+def fetch_seoul_weather():
+    resp = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": 37.5665,
+            "longitude": 126.9780,
+            "current_weather": True,
+            "hourly": "temperature_2m",
+            "timezone": "Asia/Seoul",
+            "forecast_days": 1,
+        },
+        timeout=5,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+def weather_emoji(code):
+    if code == 0:                        return "☀️"
+    if code in (1, 2, 3):               return "⛅"
+    if code in (45, 48):                 return "🌫️"
+    if code in (51, 53, 55, 61, 63, 65): return "🌧️"
+    if code in (71, 73, 75, 77):         return "🌨️"
+    if code in (80, 81, 82):             return "🌦️"
+    if code in (95, 96, 99):             return "⛈️"
+    return "🌡️"
+
+try:
+    w         = fetch_seoul_weather()
+    cur_temp  = w["current_weather"]["temperature"]
+    wcode     = w["current_weather"]["weathercode"]
+    h_times   = w["hourly"]["time"]
+    h_temps   = w["hourly"]["temperature_2m"]
+    today_str = h_times[0][:10]
+
+    hour_labels = [t[11:16] for t in h_times if t.startswith(today_str)]
+    hour_temps  = h_temps[:len(hour_labels)]
+
+    w_col1, w_col2 = st.columns([1, 3], gap="large")
+
+    with w_col1:
+        st.markdown(f"""
+<div class="kpi-card">
+  <div class="kpi-label">서울 현재 기온</div>
+  <div class="kpi-value">{weather_emoji(wcode)} {cur_temp}°C</div>
+  <div class="kpi-sub">10분마다 자동 갱신</div>
+</div>""", unsafe_allow_html=True)
+
+    with w_col2:
+        st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">오늘 서울 시간별 기온</div>', unsafe_allow_html=True)
+        weather_df = pd.DataFrame({"시간": hour_labels, "기온(°C)": hour_temps})
+        line_w = alt.Chart(weather_df).mark_line(
+            point=alt.OverlayMarkDef(color=RED, size=55),
+            color=RED,
+            strokeWidth=2.5,
+        ).encode(
+            x=alt.X("시간:N",
+                    axis=alt.Axis(labelAngle=-45, values=hour_labels[::3]),
+                    title=""),
+            y=alt.Y("기온(°C):Q", title="기온 (°C)", scale=alt.Scale(zero=False)),
+            tooltip=["시간:N", alt.Tooltip("기온(°C):Q", format=".1f", title="기온")],
+        ).properties(height=200)
+        st.altair_chart(base_chart(line_w), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+except Exception as e:
+    st.warning(f"날씨 정보를 불러올 수 없습니다: {e}")
